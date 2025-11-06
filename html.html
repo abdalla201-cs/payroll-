@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll Scheduler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        /*
+        # Payroll Scheduler - README
+
+        This is a single-file React application built to help small business managers schedule and track employee payments. It uses Vite for the development environment and Tailwind CSS for styling.
+
+        ## Features Implemented
+
+        * **Employee Management:** Add, edit, and delete employees directly in the table.
+        * **Payment Tracking:** Mark payments as "Paid" to automatically advance the schedule to the next payment date.
+        * **Payment Status:** A clear, color-coded status (Scheduled, Due, Overdue) for each upcoming payment.
+        * **Dynamic Date Calculation:** The "Next Payment Date" is automatically calculated based on the last payment and the specified interval.
+        * **Upcoming Payments:** A dedicated panel highlights the next 3 upcoming payments, sorted by date.
+        * **Payment Timeline:** A calendar-like view showing multiple future payments, with overdue payments highlighted.
+        * **CSV Import/Export:**
+            * **Export:** Download the current payroll schedule as a CSV file compatible with Excel (UTF-8 with BOM).
+            * **Import:** Upload a CSV file with employee data (`name,interval,lastDate,amount,payoneer`) to bulk-add entries.
+        * **Responsive Design:** The UI is built with Tailwind CSS and adapts to different screen sizes.
+        * **Validation:** Simple client-side validation ensures required fields are filled correctly.
+        * **✨ Gemini API Features:**
+            * **Generate Email Reminders (Multilingual):** AI-powered generation of payment reminder emails for employees in both English and Arabic.
+            * **Generate Monthly Summary:** AI-powered analysis and summary of the next month's payroll expenses.
+            * **Generate Salary Justification:** When increasing an employee's salary, automatically generate a professional justification for HR records.
+        */
+
+        const { useState, useMemo, useRef } = React;
+
+        // --- Helper Functions & Initial Data ---
+
+        const calculateNextPaymentDate = (lastDateISO, intervalDays) => {
+        if (!lastDateISO || !intervalDays || isNaN(parseInt(intervalDays, 10)) || parseInt(intervalDays, 10) <= 0) {
+            return null;
+        }
+        const parts = lastDateISO.split('-').map(p => parseInt(p, 10));
+        if (parts.length !== 3 || parts.some(isNaN)) return null;
+        const lastDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+        lastDate.setUTCDate(lastDate.getUTCDate() + parseInt(intervalDays, 10));
+        return lastDate.toISOString().split('T')[0];
+        };
+
+        const formatDate = (dateISO) => {
+            if (!dateISO) return '';
+            const date = new Date(dateISO + 'T00:00:00');
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        };
+
+        const generateFuturePayments = (employee) => {
+        const payments = [];
+        let currentLastDate = employee.lastDate;
+        
+        const horizonDate = new Date();
+        horizonDate.setFullYear(horizonDate.getFullYear() + 1); // Set horizon to 1 year from now
+
+        let safetyBreak = 0;
+        
+        while (safetyBreak < 150) { // Generous safety break to prevent infinite loops
+            const nextDate = calculateNextPaymentDate(currentLastDate, employee.interval);
+            if (!nextDate) break;
+
+            payments.push({
+            date: nextDate,
+            amount: employee.amount,
+            employeeName: employee.name,
+            employeeId: employee.id,
+            });
+
+            currentLastDate = nextDate;
+            if (new Date(nextDate) > horizonDate) break; // Stop generating after 1 year
+            safetyBreak++;
+        }
+
+        const displayStartDate = new Date();
+        displayStartDate.setMonth(displayStartDate.getMonth() - 2); // Show payments from the last 2 months for context
+        return payments.filter(p => new Date(p.date) >= displayStartDate);
+        };
+
+        const initialEmployees = [
+        { id: 1, name: 'Abdalla Mohamed', interval: 14, lastDate: '2025-08-29', amount: 475, payoneer: 'abdalla_201@yahoo.com' },
+        { id: 2, name: 'Hisham Adel', interval: 30, lastDate: '2025-08-30', amount: 450, payoneer: 'abdalla_201@yahoo.com' },
+        { id: 3, name: 'Fatma Ali', interval: 30, lastDate: '2025-09-04', amount: 400, payoneer: 'fm9506589@gmail.com' },
+        ];
+
+        // --- SVG Icons ---
+        const CheckIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>;
+        const EditIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z" /></svg>;
+        const DeleteIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
+        const AlertIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-amber-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.636-1.21 2.852-1.21 3.488 0l6.095 11.623c.633 1.205-.472 2.778-1.744 2.778H3.908c-1.272 0-2.377-1.573-1.744-2.778L8.257 3.099zM10 13a1 1 0 100-2 1 1 0 000 2zm-1-4a1 1 0 011-1h.01a1 1 0 110 2H10a1 1 0 01-1-1z" clipRule="evenodd" /></svg>;
+        const SparkleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v2.586l.293-.293a1 1 0 011.414 1.414l-2 2a1 1 0 01-1.414 0l-2-2a1 1 0 111.414-1.414L9 6.586V4a1 1 0 011-1zM3.293 9.293a1 1 0 011.414 0L6.586 11H4a1 1 0 010-2h2.586l-1.707-1.707a1 1 0 010-1.414zM10 17a1 1 0 01-1-1v-2.586l-.293.293a1 1 0 01-1.414-1.414l2-2a1 1 0 011.414 0l2 2a1 1 0 01-1.414 1.414L11 13.414V16a1 1 0 01-1 1zM16.707 9.293a1 1 0 010 1.414L14.828 12.5a1 1 0 01-1.414-1.414L15.586 9H13a1 1 0 110-2h2.586l-1.121-1.121a1 1 0 011.414-1.414L18 7.172a1 1 0 010 1.414l-1.293 1.293z" clipRule="evenodd" /></svg>;
+        const CopyIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>;
+
+        // --- Gemini API Call Function ---
+        const callGeminiAPI = async (prompt, retries = 3, delay = 1000) => {
+            const apiKey = ""; // Canvas will provide this
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    if (response.status === 429 && retries > 0) {
+                        await new Promise(res => setTimeout(res, delay));
+                        return callGeminiAPI(prompt, retries - 1, delay * 2);
+                    }
+                    throw new Error(`API error: ${response.status}`);
+                }
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                return text || "No content generated.";
+            } catch (error) {
+                console.error("Gemini API call failed:", error);
+                return "Sorry, content could not be generated at this time.";
+            }
+        };
+
+
+        // --- Main App Component ---
+        function PayrollScheduler() {
+            const [employees, setEmployees] = useState(initialEmployees);
+            const [newEmployee, setNewEmployee] = useState({ name: '', interval: '', lastDate: '', amount: '', payoneer: '' });
+            const [editingId, setEditingId] = useState(null);
+            const [editFormData, setEditFormData] = useState({});
+            const [error, setError] = useState('');
+            const [editError, setEditError] = useState('');
+            const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
+            const fileInputRef = useRef(null);
+            const todayISO = useMemo(() => new Date().toISOString().split('T')[0], []);
+            
+            // State for Gemini features
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [generatedContent, setGeneratedContent] = useState({ title: '', text: '' });
+            const [isModalOpen, setIsModalOpen] = useState(false);
+
+            const employeesWithNextDate = useMemo(() => {
+                return employees.map(emp => ({
+                    ...emp,
+                    nextDate: calculateNextPaymentDate(emp.lastDate, emp.interval),
+                }));
+            }, [employees]);
+
+            const upcomingPayments = useMemo(() => {
+                return employeesWithNextDate
+                    .filter(emp => emp.nextDate)
+                    .sort((a, b) => new Date(a.nextDate) - new Date(b.nextDate))
+                    .slice(0, 3);
+            }, [employeesWithNextDate]);
+
+            // --- Gemini Feature Handlers ---
+
+            const handleGenerateReminder = async (employee, language) => {
+                setIsGenerating(true);
+                setIsModalOpen(true);
+                setGeneratedContent({ title: `Generating ${language} Email Reminder...`, text: 'Please wait...' });
+                
+                const prompt = `Generate a brief, friendly, and professional payment reminder email in ${language}.
+                - To: ${employee.name}
+                - Subject: Upcoming Payment Notification ${language === 'Arabic' ? '(إشعار بالدفعة القادمة)' : ''}
+                - Body: Mention that a payment of $${employee.amount.toFixed(2)} is scheduled for ${formatDate(employee.nextDate)}. State that it will be processed to their registered Payoneer account.
+                - Keep the tone positive and concise. Do not include a sign-off name. Format the output cleanly as an email draft.`;
+                
+                const result = await callGeminiAPI(prompt);
+                setGeneratedContent({ title: `Reminder for ${employee.name} (${language})`, text: result });
+                setIsGenerating(false);
+            };
+            
+            const handleGenerateJustification = async (originalEmployee, newAmount) => {
+                setIsGenerating(true);
+                setIsModalOpen(true);
+                setGeneratedContent({ title: 'Generating Salary Justification...', text: 'Please wait...' });
+
+                const prompt = `Write a brief, professional justification in English for a salary increase for an employee.
+        - Employee Name: ${originalEmployee.name}
+        - Previous Salary: $${originalEmployee.amount.toFixed(2)}
+        - New Salary: $${parseFloat(newAmount).toFixed(2)}
+
+        Justify this raise based on their consistent high performance, increased responsibilities, and alignment with current market rates. The tone should be formal and suitable for internal HR records.`;
+
+                const result = await callGeminiAPI(prompt);
+                setGeneratedContent({ title: `Salary Justification for ${originalEmployee.name}`, text: result });
+                setIsGenerating(false);
+            };
+
+
+            const handleGenerateSummary = async () => {
+                setIsGenerating(true);
+                setIsModalOpen(true);
+                setGeneratedContent({ title: 'Generating Monthly Summary...', text: 'Please wait...' });
+
+                const nextMonth = new Date();
+                nextMonth.setMonth(nextMonth.getMonth() + 1);
+                const nextMonthName = nextMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+                const nextMonthPayments = employees.flatMap(emp => generateFuturePayments(emp))
+                    .filter(p => new Date(p.date).getMonth() === nextMonth.getMonth() && new Date(p.date).getFullYear() === nextMonth.getFullYear());
+                
+                const totalPayout = nextMonthPayments.reduce((sum, p) => sum + p.amount, 0);
+                const paymentDetails = nextMonthPayments.map(p => `- ${p.employeeName}: $${p.amount.toFixed(2)} on ${formatDate(p.date)}`).join('\n');
+
+                const prompt = `Analyze the following payroll data for the upcoming month of ${nextMonthName} and provide a brief, insightful summary in English for a business manager.
+                - Total number of payments: ${nextMonthPayments.length}
+                - Total payout amount: $${totalPayout.toFixed(2)}
+                - Payment details:\n${paymentDetails}
+                
+                The summary should highlight the total expenditure and mention any weeks with concentrated payment activities. Keep it professional and easy to read.`;
+                
+                const result = await callGeminiAPI(prompt);
+                setGeneratedContent({ title: `Payroll Summary for ${nextMonthName}`, text: result });
+                setIsGenerating(false);
+            };
+
+            const closeModal = () => setIsModalOpen(false);
+
+            // --- Event Handlers ---
+
+            const handleNewEmployeeChange = (e) => {
+                const { name, value } = e.target;
+                setNewEmployee(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleAddEmployee = (e) => {
+                e.preventDefault();
+                const { name, interval, lastDate, amount } = newEmployee;
+                if (!name || !interval || !lastDate || !amount) {
+                    setError('Please fill all required fields.'); return;
+                }
+                if (isNaN(parseInt(interval, 10)) || parseInt(interval, 10) <= 0 || isNaN(parseFloat(amount))) {
+                    setError('Interval must be a positive number and Amount must be a number.'); return;
+                }
+                setError('');
+                const newEntry = { id: Date.now(), ...newEmployee, interval: parseInt(interval, 10), amount: parseFloat(amount) };
+                setEmployees(prev => [...prev, newEntry]);
+                setNewEmployee({ name: '', interval: '', lastDate: '', amount: '', payoneer: '' });
+            };
+
+            const handleEditClick = (employee) => {
+                setEditingId(employee.id); setEditFormData(employee); setEditError(''); setConfirmingDeleteId(null);
+            };
+            const handleEditFormChange = (e) => {
+                const { name, value } = e.target;
+                setEditFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleSaveClick = (id) => {
+                const { name, interval, lastDate, amount } = editFormData;
+                if (!name || !interval || !lastDate || !amount) {
+                    setEditError('All fields must be filled.'); return;
+                }
+                const parsedInterval = parseInt(interval, 10);
+                const parsedAmount = parseFloat(amount);
+                if (isNaN(parsedInterval) || parsedInterval <= 0 || isNaN(parsedAmount)) {
+                    setEditError('Interval and Amount must be valid numbers.'); return;
+                }
+                
+                const updatedEmployees = employees.map(emp => 
+                    emp.id === id ? { ...emp, ...editFormData, interval: parsedInterval, amount: parsedAmount } : emp
+                );
+                setEmployees(updatedEmployees);
+                setEditingId(null);
+                setEditError('');
+            };
+
+            const handleCancelClick = () => { setEditingId(null); setEditError(''); };
+            
+            const handleDeleteClick = (id) => {
+                if (confirmingDeleteId === id) {
+                    setEmployees(employees.filter(emp => emp.id !== id));
+                    setConfirmingDeleteId(null);
+                } else {
+                    setConfirmingDeleteId(id);
+                }
+            };
+            
+            const handleMarkAsPaid = (employeeId) => {
+                const employeeToPay = employeesWithNextDate.find(emp => emp.id === employeeId);
+                if (employeeToPay && employeeToPay.nextDate) {
+                    setEmployees(prevEmployees =>
+                        prevEmployees.map(emp =>
+                            emp.id === employeeId
+                                ? { ...emp, lastDate: employeeToPay.nextDate }
+                                : emp
+                        )
+                    );
+                }
+            };
+
+            // --- CSV Functionality ---
+            const handleExportCSV = () => {
+                const headers = ['Employee', 'Interval (days)', 'Last Payment Date', 'Next Payment Date', 'Amount (Next)', 'Payoneer Email'];
+                const rows = employeesWithNextDate.map(emp => [`"${emp.name.replace(/"/g, '""')}"`, emp.interval, emp.lastDate, emp.nextDate || '', emp.amount, `"${(emp.payoneer || '').replace(/"/g, '""')}"`]);
+                const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+                const bom = '\uFEFF';
+                const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', 'payroll_schedule.csv');
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            };
+
+            const handleImportCSV = (event) => {
+                const file = event.target.files[0]; if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const text = e.target.result;
+                        const lines = text.split(/\r\n|\n/).slice(1);
+                        const newEntries = lines.map(line => line.split(',')).filter(parts => parts.length >= 5).map(parts => ({ id: Date.now() + Math.random(), name: parts[0].trim().replace(/"/g, ''), interval: parseInt(parts[1].trim(), 10), lastDate: parts[2].trim(), amount: parseFloat(parts[3].trim()), payoneer: parts[4].trim().replace(/"/g, '') })).filter(entry => entry.name && !isNaN(entry.interval) && entry.lastDate && !isNaN(entry.amount));
+                        if(newEntries.length === 0 && lines.length > 0) { console.error("Could not parse CSV. Ensure columns are: name,interval,lastDate,amount,payoneer"); } else { setEmployees(prev => [...prev, ...newEntries]); }
+                    } catch (error) { console.error("Error parsing CSV:", error); } 
+                    finally { if (fileInputRef.current) { fileInputRef.current.value = ""; } }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- Render ---
+            return (
+                <React.Fragment>
+                    <GenerationModal 
+                        isOpen={isModalOpen}
+                        onClose={closeModal}
+                        title={generatedContent.title}
+                        content={generatedContent.text}
+                        isLoading={isGenerating}
+                    />
+                    <div className="bg-slate-50 min-h-screen font-sans text-slate-800">
+                        <div className="container mx-auto p-4 md:p-8">
+                            
+                            <header className="mb-8">
+                                <h1 className="text-4xl font-bold text-slate-900">Payroll Scheduler</h1>
+                                <p className="text-slate-600 mt-1">Manage and track upcoming employee payments.</p>
+                            </header>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                                {/* Add Employee Form */}
+                                <div className="lg:col-span-1 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                                    <h2 className="text-2xl font-semibold mb-4 text-slate-800">Add New Employee</h2>
+                                    <form onSubmit={handleAddEmployee} className="space-y-4">
+                                        <div><label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-1">Employee Name</label><input type="text" id="name" name="name" value={newEmployee.name} onChange={handleNewEmployeeChange} className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" required /></div>
+                                        <div><label htmlFor="interval" className="block text-sm font-medium text-slate-700 mb-1">Days Interval</label><input type="number" id="interval" name="interval" value={newEmployee.interval} onChange={handleNewEmployeeChange} className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 14 for bi-weekly" required /></div>
+                                        <div><label htmlFor="lastDate" className="block text-sm font-medium text-slate-700 mb-1">Last Payment Date</label><input type="date" id="lastDate" name="lastDate" value={newEmployee.lastDate} onChange={handleNewEmployeeChange} className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" required /></div>
+                                        <div><label htmlFor="amount" className="block text-sm font-medium text-slate-700 mb-1">Amount</label><input type="number" step="0.01" id="amount" name="amount" value={newEmployee.amount} onChange={handleNewEmployeeChange} className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 2500.00" required /></div>
+                                        <div><label htmlFor="payoneer" className="block text-sm font-medium text-slate-700 mb-1">Payoneer Email</label><input type="email" id="payoneer" name="payoneer" value={newEmployee.payoneer} onChange={handleNewEmployeeChange} className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" /></div>
+                                        {error && <p className="text-sm text-red-600">{error}</p>}
+                                        <button type="submit" className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">Add to Schedule</button>
+                                    </form>
+                                </div>
+
+                                {/* Upcoming Payments */}
+                                <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                                    <h2 className="text-2xl font-semibold mb-4 text-slate-800">Upcoming Payments</h2>
+                                    {upcomingPayments.length > 0 ? (<ul className="space-y-3">{upcomingPayments.map(emp => (<li key={emp.id} className="flex items-center justify-between p-3 bg-slate-100 rounded-md"><div><p className="font-semibold text-slate-900">{emp.name}</p><p className="text-sm text-slate-600">{emp.payoneer}</p></div><div className="text-right"><p className="font-bold text-indigo-600 text-lg">${emp.amount.toFixed(2)}</p><p className="text-sm font-medium text-slate-700">{formatDate(emp.nextDate)}</p></div></li>))}</ul>) : (<div className="text-center py-8"><p className="text-slate-500">No upcoming payments scheduled.</p></div>)}
+                                </div>
+                            </div>
+
+                            {/* Employee Table */}
+                            <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-slate-200 mb-8">
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                                    <h2 className="text-2xl font-semibold text-slate-800">Full Schedule</h2>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button onClick={handleGenerateSummary} disabled={isGenerating} className="flex items-center gap-2 bg-purple-100 text-purple-800 font-semibold py-2 px-4 rounded-md hover:bg-purple-200 transition text-sm disabled:opacity-50">
+                                            <SparkleIcon /> ✨ إنشاء ملخص شهري
+                                        </button>
+                                        <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" ref={fileInputRef} />
+                                        <button onClick={() => fileInputRef.current && fileInputRef.current.click()} className="bg-slate-200 text-slate-800 font-semibold py-2 px-4 rounded-md hover:bg-slate-300 transition text-sm">Import CSV</button>
+                                        <button onClick={handleExportCSV} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700 transition text-sm">Export to CSV</button>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm text-left text-slate-500">
+                                        <thead className="text-xs text-slate-700 uppercase bg-slate-100">
+                                            <tr>
+                                                <th scope="col" className="px-6 py-3">Employee</th>
+                                                <th scope="col" className="px-6 py-3">Interval</th>
+                                                <th scope="col" className="px-6 py-3">Last Paid</th>
+                                                <th scope="col" className="px-6 py-3">Next Payment</th>
+                                                <th scope="col" className="px-6 py-3">Amount</th>
+                                                <th scope="col" className="px-6 py-3">Status</th>
+                                                <th scope="col" className="px-6 py-3 text-right">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {employeesWithNextDate.map(emp => (
+                                            editingId === emp.id ? (
+                                                    <EditableRow key={emp.id} employee={emp} editFormData={editFormData} handleEditFormChange={handleEditFormChange} handleSaveClick={() => handleSaveClick(emp.id)} handleCancelClick={handleCancelClick} error={editError} onGenerateJustification={handleGenerateJustification} />
+                                            ) : (
+                                                <ReadOnlyRow key={emp.id} employee={emp} todayISO={todayISO} handleEditClick={handleEditClick} handleDeleteClick={handleDeleteClick} handleMarkAsPaid={handleMarkAsPaid} isConfirmingDelete={confirmingDeleteId === emp.id} onGenerateReminder={handleGenerateReminder} isGenerating={isGenerating} />
+                                            )
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {employees.length === 0 && <p className="text-center text-slate-500 py-8">No employees added yet.</p>}
+                                </div>
+                            </div>
+                            
+                            {/* Payment Timeline */}
+                            <PaymentTimeline employees={employees} todayISO={todayISO} />
+
+                        </div>
+                    </div>
+                </React.Fragment>
+            );
+        }
+
+        // --- Sub-components for Table Rows ---
+
+        const ReadOnlyRow = ({ employee, todayISO, handleEditClick, handleDeleteClick, handleMarkAsPaid, isConfirmingDelete, onGenerateReminder, isGenerating }) => {
+            const getStatus = (nextDate) => {
+                if (!nextDate) return <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-200 text-gray-800">Missing Data</span>;
+                if (nextDate < todayISO) return <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">Overdue</span>;
+                if (nextDate === todayISO) return <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">Due Today</span>;
+                return <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">Scheduled</span>;
+            };
+
+            return (
+                <tr className="bg-white border-b hover:bg-slate-50">
+                    <td className="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">{employee.name}</td>
+                    <td className="px-6 py-4">{employee.interval} days</td>
+                    <td className="px-6 py-4">{formatDate(employee.lastDate)}</td>
+                    <td className="px-6 py-4 font-semibold text-indigo-700">{employee.nextDate ? formatDate(employee.nextDate) : '-'}</td>
+                    <td className="px-6 py-4">${employee.amount.toFixed(2)}</td>
+                    <td className="px-6 py-4">{getStatus(employee.nextDate)}</td>
+                    <td className="px-6 py-4 text-right flex items-center justify-end flex-wrap gap-2">
+                        <button 
+                            onClick={() => onGenerateReminder(employee, 'English')} 
+                            disabled={isGenerating || !employee.nextDate}
+                            title="Generate Email Reminder (English)"
+                            className="flex items-center justify-center p-2 rounded-md bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition">
+                            <SparkleIcon />
+                        </button>
+                        <button 
+                            onClick={() => onGenerateReminder(employee, 'Arabic')} 
+                            disabled={isGenerating || !employee.nextDate}
+                            title="Generate Email Reminder (Arabic)"
+                            className="flex items-center justify-center p-2 rounded-md bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition font-bold text-xs">
+                            ✨ AR
+                        </button>
+                        <button 
+                            onClick={() => handleMarkAsPaid(employee.id)} 
+                            disabled={!employee.nextDate}
+                            title="Mark as Paid"
+                            className="flex items-center justify-center p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition">
+                            <CheckIcon />
+                        </button>
+                        <button onClick={() => handleEditClick(employee)} title="Edit" className="p-2 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200 transition"><EditIcon /></button>
+                        <button onClick={() => handleDeleteClick(employee.id)} title="Delete" className={`p-2 rounded-md transition ${isConfirmingDelete ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                            {isConfirmingDelete ? 'Confirm?' : <DeleteIcon />}
+                        </button>
+                    </td>
+                </tr>
+            );
+        };
+
+        const EditableRow = ({ employee, editFormData, handleEditFormChange, handleSaveClick, handleCancelClick, error, onGenerateJustification }) => {
+            const amountIncreased = parseFloat(editFormData.amount) > employee.amount;
+
+            return (
+            <tr className="bg-slate-50 border-b">
+                <td className="px-2 py-2"><input type="text" name="name" value={editFormData.name} onChange={handleEditFormChange} className="w-full p-2 border rounded-md bg-white" /></td>
+                <td className="px-2 py-2"><input type="number" name="interval" value={editFormData.interval} onChange={handleEditFormChange} className="w-20 p-2 border rounded-md bg-white" /></td>
+                <td className="px-2 py-2"><input type="date" name="lastDate" value={editFormData.lastDate} onChange={handleEditFormChange} className="w-full p-2 border rounded-md bg-white" /></td>
+                <td className="px-6 py-4 font-semibold text-slate-500 italic">{formatDate(calculateNextPaymentDate(editFormData.lastDate, editFormData.interval))}</td>
+                <td className="px-2 py-2">
+                    <input type="number" step="0.01" name="amount" value={editFormData.amount} onChange={handleEditFormChange} className="w-24 p-2 border rounded-md bg-white" />
+                    {amountIncreased && (
+                        <button
+                            type="button"
+                            onClick={() => onGenerateJustification(employee, editFormData.amount)}
+                            className="mt-1 text-xs flex items-center gap-1 text-purple-600 hover:text-purple-800"
+                        >
+                            <SparkleIcon /> ✨ تبرير الزيادة
+                        </button>
+                    )}
+                </td>
+                <td className="px-6 py-4 text-xs text-red-600">{error}</td>
+                <td className="px-6 py-2 text-right space-x-2">
+                    <button onClick={handleSaveClick} className="font-semibold text-green-600 hover:underline">Save</button>
+                    <button onClick={handleCancelClick} className="font-semibold text-slate-600 hover:underline">Cancel</button>
+                </td>
+            </tr>
+            );
+        };
+
+        // --- Timeline Component ---
+
+        const PaymentTimeline = ({ employees, todayISO }) => {
+            const allFuturePayments = useMemo(() => {
+                return employees.flatMap(emp => generateFuturePayments(emp)).sort((a, b) => new Date(a.date) - new Date(b.date));
+            }, [employees]);
+
+            const paymentsByMonth = useMemo(() => {
+                return allFuturePayments.reduce((acc, payment) => {
+                    const month = new Date(payment.date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+                    if (!acc[month]) acc[month] = [];
+                    acc[month].push(payment);
+                    return acc;
+                }, {});
+            }, [allFuturePayments]);
+
+            const months = Object.keys(paymentsByMonth);
+            if (months.length === 0) return null;
+
+            return (
+                <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 className="text-2xl font-semibold text-slate-800 mb-6">Payment Timeline</h2>
+                    <div className="space-y-8">
+                        {months.map(month => (
+                            <div key={month}>
+                                <h3 className="text-lg font-bold text-slate-900 pb-2 mb-4 border-b-2 border-slate-200">{month}</h3>
+                                <div className="relative pl-6">
+                                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-slate-200" style={{ transform: 'translateX(2px)' }}></div>
+                                    <ul className="space-y-4">
+                                        {paymentsByMonth[month].map((payment, index) => {
+                                            const isOverdue = payment.date < todayISO;
+                                            const isDue = payment.date === todayISO;
+                                            const dotColor = isOverdue ? 'bg-red-500' : isDue ? 'bg-amber-500' : 'bg-indigo-600';
+
+                                            return (
+                                            <li key={`${payment.employeeId}-${payment.date}-${index}`} className="relative flex items-start gap-4">
+                                                <div className={`absolute left-0 top-1.5 w-2.5 h-2.5 ${dotColor} rounded-full border-2 border-white`} style={{ transform: 'translateX(-3px)' }}></div>
+                                                <div className="font-semibold text-slate-700 w-16 text-right pr-4">{new Date(payment.date + 'T00:00:00').getDate()}</div>
+                                                <div className="flex-1 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50 p-3 rounded-md border border-slate-200">
+                                                    <div>
+                                                        <p className="font-medium text-slate-800">{payment.employeeName}</p>
+                                                        {isOverdue && <p className="text-sm font-semibold text-red-600 flex items-center"><AlertIcon /> Overdue Payment</p>}
+                                                        {isDue && <p className="text-sm font-semibold text-amber-600 flex items-center"><AlertIcon /> Due Today</p>}
+                                                    </div>
+                                                    <p className="font-bold text-green-600 text-base mt-1 sm:mt-0">${payment.amount.toFixed(2)}</p>
+                                                </div>
+                                            </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Modal for Gemini Features ---
+        const GenerationModal = ({ isOpen, onClose, title, content, isLoading }) => {
+            const [copied, setCopied] = useState(false);
+
+            if (!isOpen) return null;
+
+            const handleCopy = () => {
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = content;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                        <div className="flex justify-between items-center p-4 border-b">
+                            <h3 className="text-xl font-semibold">{title}</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">&times;</button>
+                        </div>
+                        <div className="p-6 overflow-y-auto whitespace-pre-wrap">
+                            {isLoading ? (
+                                <div className="flex justify-center items-center h-48">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                                </div>
+                            ) : (
+                                <p className="text-slate-700">{content}</p>
+                            )}
+                        </div>
+                        <div className="flex justify-end items-center p-4 border-t gap-2">
+                            {!isLoading && (
+                                <button onClick={handleCopy} className="flex items-center gap-2 bg-slate-200 text-slate-800 font-semibold py-2 px-4 rounded-md hover:bg-slate-300 transition text-sm">
+                                    {copied ? <><CheckIcon /> Copied!</> : <><CopyIcon/> Copy</>}
+                                </button>
+                            )}
+                            <button onClick={onClose} className="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 transition text-sm">Close</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<PayrollScheduler />);
+    </script>
+</body>
+</html>
